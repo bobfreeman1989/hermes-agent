@@ -289,9 +289,26 @@ def build_session_context_prompt(
             desc = src.description
         lines.append(f"**Source:** {platform_name} ({desc})")
 
-    # Channel topic (if available - provides context about the channel's purpose)
+    # Channel/topic context.  For threaded messaging platforms (Telegram forum
+    # topics, Discord/Slack threads), this is not just descriptive metadata: it
+    # is the hard routing boundary for active work.  Without making that
+    # explicit in the per-turn system context, the model may merge similarly
+    # named workstreams from other topics because global memory/skills/Kanban
+    # context are still visible.
+    if context.source.thread_id:
+        lines.append(f"**Thread/Topic ID:** {context.source.thread_id}")
     if context.source.chat_topic:
         lines.append(f"**Channel Topic:** {context.source.chat_topic}")
+    if context.source.thread_id or context.source.chat_topic:
+        topic_label = context.source.chat_topic or f"topic {context.source.thread_id}"
+        lines.append(
+            "**Topic isolation:** Treat the current chat/thread/topic as the "
+            f"authoritative workstream (`{topic_label}`). Do not import active "
+            "targets, next actions, task state, or assumptions from other "
+            "Telegram topics/channels unless the user explicitly references "
+            "that other topic. If retrieved context conflicts with this topic, "
+            "prefer the current topic and state the conflict before acting."
+        )
 
     # User identity.
     # In shared multi-user sessions (shared threads OR shared non-thread groups

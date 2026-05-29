@@ -546,6 +546,25 @@ _OBSERVED_GROUP_CONTEXT_HEADER = "[Observed Telegram group context - context onl
 _CURRENT_ADDRESSED_MESSAGE_HEADER = "[Current addressed message - answer only this unless it explicitly asks you to use the observed context]"
 
 
+def _extract_default_kanban_board_from_channel_prompt(channel_prompt: Optional[str]) -> Optional[str]:
+    """Return a topic/channel default board slug from an ephemeral prompt.
+
+    Telegram topic routing prompts commonly include a YAML-ish line like::
+
+        - default_kanban_board: better-contractor
+
+    The gateway should treat that as routing metadata for raw ``/kanban``
+    commands too; otherwise natural-language work goes to the topic board while
+    slash-created tasks silently fall back to the process/global current board.
+    """
+    if not channel_prompt:
+        return None
+    m = re.search(r"(?im)^\s*-?\s*default_kanban_board\s*:\s*`?([A-Za-z0-9][A-Za-z0-9_.-]*)`?\s*$", channel_prompt)
+    if not m:
+        return None
+    return m.group(1).strip() or None
+
+
 def _uses_telegram_observed_group_context(channel_prompt: Optional[str]) -> bool:
     """Return True for Telegram group turns that may include observed chatter.
 
@@ -9772,6 +9791,20 @@ class GatewayRunner:
             break
 
         is_create = action == "create"
+        if is_create and not requested_board:
+            topic_default_board = _extract_default_kanban_board_from_channel_prompt(
+                getattr(event, "channel_prompt", None)
+            )
+            if topic_default_board:
+                tokens = ["--board", topic_default_board] + tokens
+                text = shlex.join(tokens)
+                requested_board = topic_default_board
+                logger.info(
+                    "Auto-injected /kanban --board %s from topic channel_prompt for %s:%s",
+                    topic_default_board,
+                    getattr(getattr(event, "source", None), "chat_id", ""),
+                    getattr(getattr(event, "source", None), "thread_id", ""),
+                )
 
         try:
             output = await asyncio.to_thread(run_slash, text)
