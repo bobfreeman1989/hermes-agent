@@ -5688,10 +5688,12 @@ class TelegramAdapter(BasePlatformAdapter):
             thread_id_str = self._GENERAL_TOPIC_THREAD_ID
         chat_topic = None
         topic_skill = None
+        topic_metadata: dict[str, Any] = {}
 
         if chat_type == "dm" and thread_id_str:
             topic_info = self._get_dm_topic_info(str(chat.id), thread_id_str)
             if topic_info:
+                topic_metadata = dict(topic_info)
                 chat_topic = topic_info.get("name")
                 topic_skill = topic_info.get("skill")
 
@@ -5711,6 +5713,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     for topic in chat_entry.get("topics", []):
                         tid = topic.get("thread_id")
                         if tid is not None and str(tid) == thread_id_str:
+                            topic_metadata = dict(topic)
                             chat_topic = topic.get("name")
                             topic_skill = topic.get("skill")
                             break
@@ -5763,14 +5766,18 @@ class TelegramAdapter(BasePlatformAdapter):
                     or None
                 )
 
-        # Per-channel/topic ephemeral prompt
+        # Per-channel/topic ephemeral prompt.  Support both compact topic keys
+        # ("<thread_id>") and chat-qualified keys ("<chat_id>:<thread_id>") so
+        # different forum groups can safely reuse numeric Telegram thread ids.
         from gateway.platforms.base import resolve_channel_prompt
         _chat_id_str = str(chat.id)
-        _channel_prompt = resolve_channel_prompt(
-            self.config.extra,
-            thread_id_str or _chat_id_str,
-            _chat_id_str if thread_id_str else None,
-        )
+        if thread_id_str:
+            _channel_prompt = (
+                resolve_channel_prompt(self.config.extra, f"{_chat_id_str}:{thread_id_str}", None)
+                or resolve_channel_prompt(self.config.extra, thread_id_str, _chat_id_str)
+            )
+        else:
+            _channel_prompt = resolve_channel_prompt(self.config.extra, _chat_id_str, None)
 
         return MessageEvent(
             text=message.text or "",
@@ -5783,6 +5790,7 @@ class TelegramAdapter(BasePlatformAdapter):
             reply_to_text=reply_to_text,
             auto_skill=topic_skill,
             channel_prompt=_channel_prompt,
+            channel_metadata=topic_metadata,
             timestamp=message.date,
         )
 

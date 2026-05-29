@@ -1255,6 +1255,12 @@ class MessageEvent:
     # Applied at API call time and never persisted to transcript history.
     channel_prompt: Optional[str] = None
 
+    # Structured per-channel/topic metadata recovered from platform config.
+    # Unlike ``channel_prompt`` this is intended for gateway-side routing
+    # decisions (for example selecting a default Kanban board for slash
+    # commands) and is not injected into model-visible history by itself.
+    channel_metadata: Dict[str, Any] = field(default_factory=dict)
+
     # Channel context recovered by history backfill (e.g. messages between
     # bot turns that were missed due to require_mention).  Kept separate
     # from ``text`` so the sender-prefix logic in run.py can operate on the

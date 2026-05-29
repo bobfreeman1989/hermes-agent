@@ -546,6 +546,44 @@ _OBSERVED_GROUP_CONTEXT_HEADER = "[Observed Telegram group context - context onl
 _CURRENT_ADDRESSED_MESSAGE_HEADER = "[Current addressed message - answer only this unless it explicitly asks you to use the observed context]"
 
 
+_KANBAN_BOARD_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+def _clean_default_kanban_board(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    board = value.strip().strip("`")
+    if not board or not _KANBAN_BOARD_SLUG_RE.fullmatch(board):
+        return None
+    return board
+
+
+def _extract_default_kanban_board_from_channel_prompt(channel_prompt: Optional[str]) -> Optional[str]:
+    """Return a topic/channel default board slug from legacy prompt metadata."""
+    if not channel_prompt:
+        return None
+    m = re.search(r"(?im)^\s*-?\s*default_kanban_board\s*:\s*`?([A-Za-z0-9][A-Za-z0-9_.-]*)`?\s*$", channel_prompt)
+    if not m:
+        return None
+    return _clean_default_kanban_board(m.group(1))
+
+
+def _default_kanban_board_for_event(event: Any) -> Optional[str]:
+    """Return the configured topic/channel default Kanban board for an event.
+
+    Prefer structured platform metadata (for example Telegram ``group_topics``
+    entries with ``default_kanban_board``) and keep the channel-prompt parser as
+    a compatibility fallback for existing deployments that embedded routing
+    metadata in ephemeral prompts.
+    """
+    metadata = getattr(event, "channel_metadata", None)
+    if isinstance(metadata, dict):
+        board = _clean_default_kanban_board(metadata.get("default_kanban_board"))
+        if board:
+            return board
+    return _extract_default_kanban_board_from_channel_prompt(getattr(event, "channel_prompt", None))
+
+
 def _uses_telegram_observed_group_context(channel_prompt: Optional[str]) -> bool:
     """Return True for Telegram group turns that may include observed chatter.
 
@@ -9847,6 +9885,18 @@ class GatewayRunner:
             break
 
         is_create = action == "create"
+        if is_create and not requested_board:
+            topic_default_board = _default_kanban_board_for_event(event)
+            if topic_default_board:
+                tokens = ["--board", topic_default_board] + tokens
+                text = shlex.join(tokens)
+                requested_board = topic_default_board
+                logger.info(
+                    "Auto-injected /kanban --board %s from topic/channel metadata for %s:%s",
+                    topic_default_board,
+                    getattr(getattr(event, "source", None), "chat_id", ""),
+                    getattr(getattr(event, "source", None), "thread_id", ""),
+                )
 
         try:
             output = await asyncio.to_thread(run_slash, text)

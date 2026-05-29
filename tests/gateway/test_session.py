@@ -280,6 +280,54 @@ class TestBuildSessionContextPrompt:
         assert "Discord" in prompt
         assert "**Channel Topic:** Planning and coordination for Project X" in prompt
 
+    def test_thread_topic_prompt_marks_workstream_boundary(self):
+        """Thread/topic metadata should be explicit routing context, not only decoration."""
+        config = GatewayConfig(
+            platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token="fake")},
+        )
+        source = SessionSource(
+            platform=Platform.TELEGRAM,
+            chat_id="-1002285219667",
+            chat_name="Test Group",
+            chat_type="group",
+            thread_id="17585",
+            chat_topic="Project Alpha",
+            user_name="Alice",
+        )
+        ctx = build_session_context(source, config)
+        prompt = build_session_context_prompt(ctx)
+
+        assert "**Thread/Topic ID:** 17585" in prompt
+        assert "**Channel Topic:** Project Alpha" in prompt
+        assert "**Topic isolation:**" in prompt
+        assert "authoritative workstream" in prompt
+
+    def test_default_kanban_board_prefers_structured_channel_metadata(self):
+        """Slash routing should use topic metadata before legacy prompt parsing."""
+        from gateway.run import _default_kanban_board_for_event
+
+        event = MessageEvent(
+            text="/kanban create test",
+            channel_metadata={"default_kanban_board": "topic-board"},
+            channel_prompt="- default_kanban_board: legacy-board",
+        )
+
+        assert _default_kanban_board_for_event(event) == "topic-board"
+
+    def test_default_kanban_board_falls_back_to_legacy_channel_prompt(self):
+        """Existing deployments that kept board metadata in prompts still work."""
+        from gateway.run import _default_kanban_board_for_event
+
+        event = MessageEvent(
+            text="/kanban create test",
+            channel_prompt="""
+            This topic handles project work.
+            - default_kanban_board: `legacy-board`
+            """,
+        )
+
+        assert _default_kanban_board_for_event(event) == "legacy-board"
+
     def test_prompt_omits_channel_topic_when_none(self):
         """Channel Topic line should NOT appear when chat_topic is None."""
         config = GatewayConfig(
